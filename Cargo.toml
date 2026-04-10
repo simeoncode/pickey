@@ -1,0 +1,16 @@
+[package]
+name = "pickey"
+version = "0.1.0"
+edition = "2021"
+description = "Automatic SSH key selection for git"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+glob-match = "0.2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+dirs = "6"
+
+[dev-dependencies]
+tempfile = "3"
