@@ -18,27 +18,27 @@ pub fn level() -> LogLevel {
 /// Log a one-line summary (default level).
 pub fn info(msg: &str) {
     if level() != LogLevel::Off {
-        eprintln!("[pickey] {}", msg);
+        eprintln!("[🔑🤏] {}", msg);
     }
 }
 
 /// Log a warning (default level).
 pub fn warn(msg: &str) {
     if level() != LogLevel::Off {
-        eprintln!("[pickey] WARN: {}", msg);
+        eprintln!("[🔑🤏] WARN: {}", msg);
     }
 }
 
 /// Log an error (always shown unless OFF).
 pub fn error(msg: &str) {
     if level() != LogLevel::Off {
-        eprintln!("[pickey] ERROR: {}", msg);
+        eprintln!("[🔑🤏] ERROR: {}", msg);
     }
 }
 
 /// Log a debug message (only in debug mode).
 pub fn debug(msg: &str) {
     if level() == LogLevel::Debug {
-        eprintln!("[pickey] DEBUG: {}", msg);
+        eprintln!("[🔑🤏] DEBUG: {}", msg);
     }
 }
