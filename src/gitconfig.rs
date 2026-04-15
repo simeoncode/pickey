@@ -154,18 +154,32 @@ pub fn check_email_before_push(expected_email: &str, repo_path: &str) -> bool {
     true
 }
 
-/// Find unique author emails in recent commits that don't match the expected email.
+/// Find unique author emails in unpushed commits that don't match the expected email.
+/// Only checks commits between @{u} (upstream) and HEAD.
+/// Falls back to all commits if there's no upstream (e.g. new branch with no remote).
 fn find_mismatched_emails(target: &Path, expected_email: &str) -> Vec<String> {
+    // Try unpushed-only first: @{u}..HEAD
     let output = Command::new("git")
         .arg("-C")
         .arg(target)
-        .args(["log", "--format=%ae", "-50"])
+        .args(["log", "--format=%ae", "@{u}..HEAD"])
         .output();
 
-    let Ok(output) = output else { return vec![] };
-    if !output.status.success() {
-        return vec![];
-    } // no commits yet
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => {
+            // No upstream tracking branch — fall back to all commits (new repo / new branch)
+            let fallback = Command::new("git")
+                .arg("-C")
+                .arg(target)
+                .args(["log", "--format=%ae", "-50"])
+                .output();
+            match fallback {
+                Ok(o) if o.status.success() => o,
+                _ => return vec![],
+            }
+        }
+    };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let expected_lower = expected_email.to_lowercase();

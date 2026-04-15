@@ -25,6 +25,7 @@
 
 ## Next
 
+- [ ] `pickey check` interactive rule creation — When no rule matches, offer to create one (pick key, set email/name, write to config)
 - [ ] Directory matching (dir = "~/work/*") support in rules
 - [ ] GitHub Actions CI
 - [ ] Install script (`install.sh`) — Detect OS/arch, copy binary, print instruction to run `pickey init`
