@@ -2,13 +2,28 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
 
 jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          release-type: rust
+
   build:
+    needs: release-please
+    if: needs.release-please.outputs.release_created
     strategy:
       matrix:
         include:
@@ -35,8 +50,8 @@ jobs:
           name: pickey-${{ matrix.target }}
           path: pickey-${{ matrix.target }}
 
-  release:
-    needs: build
+  upload:
+    needs: [release-please, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -46,5 +61,5 @@ jobs:
           mv pickey-*/pickey-* dist/
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
           files: dist/*
-          generate_release_notes: true
