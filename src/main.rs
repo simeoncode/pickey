@@ -168,19 +168,15 @@ fn run_ssh_command(args: &[String]) {
                 process::exit(1);
             }
 
-            // Ensure key is in agent
-            let agent_status = match agent::ensure_key_loaded(&key_path, config.apple_keychain) {
-                Ok(true) => "loaded",
-                Ok(false) => "just loaded",
-                Err(e) => {
-                    log::error(&format!("Agent error: {}", e));
-                    process::exit(1);
-                }
-            };
+            let port_info = m
+                .rule
+                .port
+                .map(|p| format!(" (port: {})", p))
+                .unwrap_or_default();
 
             log::info(&format!(
-                "{}/{} → {} (agent: {})",
-                invocation.host, invocation.path, m.rule.key, agent_status
+                "{}/{} → {}{}",
+                invocation.host, invocation.path, m.rule.key, port_info
             ));
 
             // Pre-flight: abort push if commits have wrong email
