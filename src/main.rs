@@ -31,7 +31,7 @@ enum Commands {
         /// Git remote URL or host:org/repo shorthand
         url: String,
     },
-    /// List all rules and agent status
+    /// List all rules
     List,
     /// SSH to the forge, show which identity it returns
     Test,
@@ -205,8 +205,7 @@ fn run_ssh_command(args: &[String]) {
             process::exit(code);
         }
         None => {
-            let hint =
-                agent::default_key_hint().unwrap_or_else(|| "unknown (agent empty?)".to_string());
+            let hint = agent::default_key_hint().unwrap_or_else(|| "unknown".to_string());
             log::warn(&format!(
                 "{}/{} → no matching rule, falling through to ssh default: {}",
                 invocation.host, invocation.path, hint

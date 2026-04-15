@@ -3,16 +3,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
-    /// macOS: use --apple-use-keychain with ssh-add
-    #[serde(default = "default_apple_keychain")]
-    pub apple_keychain: bool,
-
     #[serde(rename = "rule", default)]
     pub rules: Vec<Rule>,
-}
-
-fn default_apple_keychain() -> bool {
-    cfg!(target_os = "macos")
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -135,21 +127,5 @@ key = "~/.ssh/id_client_gitlab"
     fn no_tilde() {
         let expanded = expand_tilde("/absolute/path/key");
         assert_eq!(expanded, PathBuf::from("/absolute/path/key"));
-    }
-
-    #[test]
-    fn apple_keychain_default() {
-        let toml = r#"
-[[rule]]
-host = "github.com"
-key = "~/.ssh/id"
-"#;
-        let config: Config = toml::from_str(toml).unwrap();
-        // On macOS this should be true, on Linux false
-        if cfg!(target_os = "macos") {
-            assert!(config.apple_keychain);
-        } else {
-            assert!(!config.apple_keychain);
-        }
     }
 }

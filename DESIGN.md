@@ -2,14 +2,14 @@
 
 ## The problem
 
-SSH config is host-centric, but git forges are org-centric. You authenticate to `github.com` — but you might need three different SSH keys for three different GitHub orgs. SSH has no concept of "this key for this org."
+You might need three different SSH keys for three different GitHub orgs. SSH has no concept of "use this key for this org".
 
 The common workarounds all have a fatal flaw:
 
 - **Host aliases** (`github.com-work` in `~/.ssh/config`) — contaminates your remote URLs with fake hostnames. Every clone URL must be rewritten. Breaks copy-paste, breaks scripts, breaks AI agents.
 - **`includeIf "gitdir:"`** — ties identity to filesystem location. Breaks for `/tmp` clones, worktrees in unexpected paths, or any repo not under the expected directory.
 - **`includeIf "hasconfig:remote.*.url:"`** — the remote doesn't exist yet during `git clone`, so the rule can't fire when it matters most.
-- **SSH key managers** — indirection, complexity, or not built to work in tandem with git.
+- **SSH key managers** — indirection, does too much, or not built to work in tandem with git.
 
 pickey solves this by sitting as git's `sshCommand`. At invocation time, the full remote URL is already in the SSH arguments — host, org, and repo. pickey matches that against rules and injects the right key. Works at clone time, works from `/tmp`, works when AI agents spawn terminals.
 
@@ -19,14 +19,15 @@ pickey is a transparent SSH proxy for git. It does one thing: pick the right key
 
 **Does:**
 - Select SSH key based on remote URL pattern
-- Ensure the key is loaded in ssh-agent
+- Inject `-o IdentityAgent=none` so only the selected key is offered
 - Set repo-local `user.email`/`user.name` after SSH operations
+- Block pushes when unpushed commits have wrong author email
 - Onboard from existing git config (`pickey init`)
 
 **Does not:**
 - Manage key lifecycle (create, rotate, delete) — use `ssh-keygen`
 - Parse or modify `~/.ssh/config` — pickey's command-line flags (`-i`, `-o IdentitiesOnly=yes`) take precedence at runtime without touching SSH config
-- Manage ssh-agent beyond loading matched keys — agent lifecycle is the OS/shell's job
+- Interact with ssh-agent — keys are read directly from disk via `-i`, agent is disabled per-invocation
 - Handle HTTPS auth — SSH only
 
 ## FAQ / Decisions
@@ -41,7 +42,7 @@ pickey needs to perform post-SSH actions: setting `user.email` and `user.name` i
 
 ### Why `IdentitiesOnly=yes` is always injected
 
-Without it, ssh offers every key in the agent to the server, regardless of what `-i` specifies. On forges like GitHub, the server accepts the first key that matches *any* account — which may not be the one pickey selected. `IdentitiesOnly=yes` tells ssh to only offer the key pickey chose. This is the entire point.
+Without it, ssh offers every key in the agent to the server, regardless of what `-i` specifies. On forges like GitHub, the server accepts the first key that matches *any* account — which may not be the one pickey selected. `IdentitiesOnly=yes` tells ssh to only offer the key pickey chose.
 
 ### Why `auto = true` exists
 

@@ -1,6 +1,5 @@
 use std::process::Command;
 
-use crate::agent;
 use crate::config::{self, Config};
 use crate::matcher;
 
@@ -148,7 +147,7 @@ pub fn check(config: &Config, url: &str) {
     }
 }
 
-/// `pickey list` — show all rules and agent status.
+/// `pickey list` — show all rules.
 pub fn list(config: &Config) {
     if config.rules.is_empty() {
         println!("No rules configured.");
@@ -159,11 +158,6 @@ pub fn list(config: &Config) {
     for (i, rule) in config.rules.iter().enumerate() {
         let key_path = rule.expanded_key();
         let exists = key_path.exists();
-        let in_agent = if exists {
-            agent::is_key_loaded(&key_path).unwrap_or(false)
-        } else {
-            false
-        };
 
         println!(
             "#{} {}{}",
@@ -175,14 +169,9 @@ pub fn list(config: &Config) {
                 .unwrap_or_default()
         );
         println!(
-            "   Key:   {} {} {}",
+            "   Key:   {} {}",
             rule.key,
-            if exists { "✓" } else { "✗" },
-            if in_agent {
-                "(agent: loaded)"
-            } else {
-                "(agent: not loaded)"
-            }
+            if exists { "✓" } else { "✗ (not found)" },
         );
         if let Some(email) = &rule.email {
             println!("   Email: {}", email);
