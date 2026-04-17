@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/simeoncode/pickey/compare/v0.2.0...v0.3.0) (2026-04-17)
+
+
+### Features
+
+* tighten email push check ([#3](https://github.com/simeoncode/pickey/issues/3)) ([10c47d4](https://github.com/simeoncode/pickey/commit/10c47d47c39b1ccaa43831413b13fa2b8996179b))
+
 ## [0.2.0](https://github.com/simeoncode/pickey/compare/v0.1.0...v0.2.0) (2026-04-15)
 
 
