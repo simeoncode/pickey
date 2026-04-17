@@ -113,7 +113,7 @@ pub fn set_local_config(email: Option<&str>, name: Option<&str>, repo_path: &str
     }
 }
 
-/// Pre-flight check before push: are there commits with the wrong email?
+/// Pre-flight check before push: are there tracked unpushed commits with the wrong email?
 /// Returns true if the push should be aborted.
 ///
 /// Skipped if PICKEY_ALLOW_EMAIL=1 is set in the environment.
@@ -133,7 +133,11 @@ pub fn check_email_before_push(expected_email: &str, repo_path: &str) -> bool {
         None => return false,
     };
 
-    let mismatched = find_mismatched_emails(&target, expected_email);
+    let mismatched = match tracked_mismatched_emails(&target, expected_email) {
+        Some(mismatched) => mismatched,
+        None => return false,
+    };
+
     if mismatched.is_empty() {
         return false;
     }
@@ -146,7 +150,10 @@ pub fn check_email_before_push(expected_email: &str, repo_path: &str) -> bool {
         list, expected_email,
     ));
     eprintln!();
-    eprintln!("  To fix the unpushed commits:");
+    eprintln!("  Commits checked by pickey:");
+    eprintln!("    git log --format='%h %ae %s' @{{u}}..HEAD");
+    eprintln!();
+    eprintln!("  To fix the mismatched commits:");
     eprintln!("    git rebase -i @{{u}} --exec 'git commit --amend --reset-author --no-edit'");
     eprintln!();
     eprintln!("  To bypass this check just for this push:");
@@ -154,43 +161,50 @@ pub fn check_email_before_push(expected_email: &str, repo_path: &str) -> bool {
     true
 }
 
-/// Find unique author emails in unpushed commits that don't match the expected email.
-/// Only checks commits between @{u} (upstream) and HEAD.
-/// Falls back to all commits if there's no upstream (e.g. new branch with no remote).
+/// Find unique author emails in tracked unpushed commits that don't match the expected email.
+/// Only checks @{u}..HEAD, since that is the exact range git will compare for a tracked branch.
+#[cfg(test)]
 fn find_mismatched_emails(target: &Path, expected_email: &str) -> Vec<String> {
-    // Try unpushed-only first: @{u}..HEAD
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(target)
-        .args(["log", "--format=%ae", "@{u}..HEAD"])
-        .output();
+    tracked_mismatched_emails(target, expected_email).unwrap_or_default()
+}
 
-    let output = match output {
-        Ok(o) if o.status.success() => o,
-        _ => {
-            // No upstream tracking branch — fall back to all commits (new repo / new branch)
-            let fallback = Command::new("git")
-                .arg("-C")
-                .arg(target)
-                .args(["log", "--format=%ae", "-50"])
-                .output();
-            match fallback {
-                Ok(o) if o.status.success() => o,
-                _ => return vec![],
-            }
+fn tracked_mismatched_emails(target: &Path, expected_email: &str) -> Option<Vec<String>> {
+    let stdout = match git_log_emails(target, &["@{u}..HEAD"]) {
+        Some(stdout) => stdout,
+        None => {
+            log::debug("Skipping push email check: current branch has no upstream");
+            return None;
         }
     };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let expected_lower = expected_email.to_lowercase();
 
     let mut seen = std::collections::HashSet::new();
-    stdout
+    let mismatched = stdout
         .lines()
         .filter(|e| !e.is_empty() && e.to_lowercase() != expected_lower)
         .filter(|e| seen.insert(e.to_lowercase()))
         .map(|e| e.to_string())
-        .collect()
+        .collect();
+
+    Some(mismatched)
+}
+
+fn git_log_emails(target: &Path, revisions: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(target)
+        .arg("log")
+        .arg("--format=%ae")
+        .args(revisions)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 #[cfg(test)]
@@ -229,6 +243,30 @@ mod tests {
             .args(["config", "--local", key, value])
             .output()
             .expect("git config set failed");
+    }
+
+    fn git_update_ref(dir: &Path, reference: &str, revision: &str) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["update-ref", reference, revision])
+            .output()
+            .expect("git update-ref failed");
+        assert!(output.status.success(), "git update-ref should succeed");
+    }
+
+    fn git_current_branch(dir: &Path) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["branch", "--show-current"])
+            .output()
+            .expect("git branch --show-current failed");
+        assert!(
+            output.status.success(),
+            "git branch --show-current should succeed"
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
 
     // ---- resolve_target tests (pure path logic, no CWD mutation) ----
@@ -350,15 +388,52 @@ mod tests {
         assert_eq!(git_config_get(&repo, "user.email"), None);
     }
 
-    /// Simulates the exact GitHub "new repo on command line" workflow:
-    ///   git init → git commit (wrong email) → git remote add → git push
-    /// With strict=true (default), the push should be blocked.
+    /// Tracked branches should block when commits since @{u} use the wrong email.
     #[test]
-    fn preflight_github_workflow_strict_blocks_push() {
+    fn preflight_tracked_branch_blocks_push() {
         let tmp = TempDir::new().unwrap();
         let repo = tmp.path().join("my-repo");
         std::fs::create_dir(&repo).unwrap();
         git_init(&repo);
+
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:WorkOrg/my-repo.git",
+            ])
+            .output()
+            .unwrap();
+
+        git_config_set(&repo, "user.email", "work@corp.com");
+        git_config_set(&repo, "user.name", "Work Name");
+        std::fs::write(repo.join("base.txt"), "base").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["add", "base.txt"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["commit", "-q", "-m", "base commit"])
+            .output()
+            .unwrap();
+
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["checkout", "-q", "-b", "feature"])
+            .output()
+            .unwrap();
+
+        git_update_ref(&repo, "refs/remotes/origin/feature", "HEAD");
+        git_config_set(&repo, "branch.feature.remote", "origin");
+        git_config_set(&repo, "branch.feature.merge", "refs/heads/feature");
 
         // User commits with personal email
         git_config_set(&repo, "user.email", "personal@gmail.com");
@@ -377,7 +452,7 @@ mod tests {
             .output()
             .unwrap();
 
-        // Pre-flight check with strict=true should block
+        // Pre-flight check should block because the branch tracks origin/feature
         let blocked = find_mismatched_emails(&repo, "work@corp.com");
         assert!(!blocked.is_empty(), "Should detect mismatched email");
         assert!(blocked.iter().any(|e| e == "personal@gmail.com"));
@@ -415,13 +490,25 @@ mod tests {
         assert!(!should_abort, "PICKEY_ALLOW_EMAIL=1 should bypass check");
     }
 
-    /// No mismatched commits → push should proceed
+    /// No mismatched commits on a tracked branch → push should proceed
     #[test]
     fn preflight_no_mismatch_allows_push() {
         let tmp = TempDir::new().unwrap();
         let repo = tmp.path().join("my-repo");
         std::fs::create_dir(&repo).unwrap();
         git_init(&repo);
+
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:WorkOrg/my-repo.git",
+            ])
+            .output()
+            .unwrap();
 
         git_config_set(&repo, "user.email", "work@corp.com");
         git_config_set(&repo, "user.name", "Work Name");
@@ -439,8 +526,49 @@ mod tests {
             .output()
             .unwrap();
 
+        let branch = git_current_branch(&repo);
+        git_update_ref(&repo, &format!("refs/remotes/origin/{}", branch), "HEAD");
+        git_config_set(&repo, &format!("branch.{}.remote", branch), "origin");
+        git_config_set(
+            &repo,
+            &format!("branch.{}.merge", branch),
+            &format!("refs/heads/{}", branch),
+        );
+
         let mismatched = find_mismatched_emails(&repo, "work@corp.com");
         assert!(mismatched.is_empty(), "No mismatch should be found");
+    }
+
+    /// New branches without an upstream should not block, even if history contains
+    /// other author emails, because pickey cannot prove what will be pushed yet.
+    #[test]
+    fn preflight_new_branch_without_upstream_skips_check() {
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("my-repo");
+        std::fs::create_dir(&repo).unwrap();
+        git_init(&repo);
+
+        git_config_set(&repo, "user.email", "personal@gmail.com");
+        git_config_set(&repo, "user.name", "Personal Me");
+        std::fs::write(repo.join("feature.txt"), "feature").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["add", "feature.txt"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["commit", "-q", "-m", "local personal"])
+            .output()
+            .unwrap();
+
+        let mismatched = find_mismatched_emails(&repo, "work@corp.com");
+        assert!(
+            mismatched.is_empty(),
+            "No upstream should mean no blocking preflight result"
+        );
     }
 
     /// Empty repo (no commits) → no mismatch

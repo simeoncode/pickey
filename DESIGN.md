@@ -21,7 +21,7 @@ pickey is a transparent SSH proxy for git. It does one thing: pick the right key
 - Select SSH key based on remote URL pattern
 - Inject `-o IdentityAgent=none` so only the selected key is offered
 - Set repo-local `user.email`/`user.name` after SSH operations
-- Block pushes when unpushed commits have wrong author email
+- Block pushes when tracked unpushed commits have wrong author email
 - Onboard from existing git config (`pickey init`)
 
 **Does not:**
