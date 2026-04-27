@@ -25,7 +25,8 @@ pub fn init(dry_run: bool) {
         })
         .collect();
     let local_overrides = find_repos_with_local_ssh_command(&git_info.include_ifs);
-    let suggestions = build_suggestions(&git_info, &keys, &local_overrides);
+    let suggestion_build = build_suggestions(&git_info, &keys, &local_overrides);
+    let suggestions = &suggestion_build.rules;
 
     let already_enabled = git_info
         .global_ssh_command
@@ -40,17 +41,18 @@ pub fn init(dry_run: bool) {
 
     if dry_run {
         // Verbose diagnostic output
-        print_dry_run(
-            &keys,
-            &git_info,
-            &local_overrides,
-            &suggestions,
-            &scanned_dirs,
+        print_dry_run(DryRunInput {
+            keys: &keys,
+            git_info: &git_info,
+            local_overrides: &local_overrides,
+            suggestions,
+            manual_rules: &suggestion_build.manual_rules,
+            scanned_dirs: &scanned_dirs,
             already_enabled,
             has_foreign_global,
             has_include_conflicts,
             has_local_conflicts,
-        );
+        });
         return;
     }
 
@@ -69,11 +71,12 @@ pub fn init(dry_run: bool) {
             "  Create {} manually, or add SSH keys and includeIf entries first.",
             config_display
         );
+        print_manual_rule_actions(&suggestion_build.manual_rules);
         return;
     }
 
     if config_path.exists() {
-        let merged = merge_config(&config_path, &suggestions);
+        let merged = merge_config(&config_path, suggestions);
         match merged {
             ConfigMergeResult::Unchanged(count) => {
                 println!("✓ Config: {} ({} rules, up to date)", config_display, count);
@@ -105,7 +108,7 @@ pub fn init(dry_run: bool) {
             }
         }
     } else if !suggestions.is_empty() {
-        let toml = format_auto_config(&suggestions);
+        let toml = format_auto_config(suggestions);
         if let Err(e) = write_config(&config_path, &toml) {
             println!("✗ Failed to write {}: {}", config_display, e);
         } else {
@@ -113,6 +116,8 @@ pub fn init(dry_run: bool) {
             changed = true;
         }
     }
+
+    print_manual_rule_actions(&suggestion_build.manual_rules);
 
     // 2. Fix conflicts
     if has_include_conflicts || has_local_conflicts {
@@ -196,26 +201,29 @@ pub fn init(dry_run: bool) {
     }
 }
 
-fn print_dry_run(
-    keys: &[SshKey],
-    git_info: &GitInfo,
-    local_overrides: &[LocalSshOverride],
-    suggestions: &[SuggestedRule],
-    scanned_dirs: &[String],
+struct DryRunInput<'a> {
+    keys: &'a [SshKey],
+    git_info: &'a GitInfo,
+    local_overrides: &'a [LocalSshOverride],
+    suggestions: &'a [SuggestedRule],
+    manual_rules: &'a [ManualRule],
+    scanned_dirs: &'a [String],
     already_enabled: bool,
     has_foreign_global: bool,
     has_include_conflicts: bool,
     has_local_conflicts: bool,
-) {
+}
+
+fn print_dry_run(input: DryRunInput<'_>) {
     let home = dirs::home_dir().unwrap_or_default();
     println!("pickey init --dry-run\n");
 
     // Keys
-    if keys.is_empty() {
+    if input.keys.is_empty() {
         println!("Keys: (none found)");
     } else {
         let mut by_dir: Vec<(String, Vec<String>)> = Vec::new();
-        for key in keys {
+        for key in input.keys {
             let dir_display = key
                 .path
                 .parent()
@@ -241,22 +249,23 @@ fn print_dry_run(
     }
 
     // Global sshCommand status
-    if already_enabled {
+    if input.already_enabled {
         println!("\nGlobal sshCommand: pickey ✓");
-    } else if has_foreign_global {
+    } else if input.has_foreign_global {
         println!(
             "\nGlobal sshCommand: {} (will be replaced)",
-            git_info.global_ssh_command.as_deref().unwrap()
+            input.git_info.global_ssh_command.as_deref().unwrap()
         );
     } else {
         println!("\nGlobal sshCommand: (not set, will enable)");
     }
 
     // Conflicts
-    if has_include_conflicts || has_local_conflicts {
+    if input.has_include_conflicts || input.has_local_conflicts {
         println!("\nConflicts to fix:");
-        if has_include_conflicts {
-            for inc in git_info
+        if input.has_include_conflicts {
+            for inc in input
+                .git_info
                 .include_ifs
                 .iter()
                 .filter(|i| i.ssh_command.is_some())
@@ -264,8 +273,8 @@ fn print_dry_run(
                 println!("  sshCommand in {} will be disabled", inc.config_path);
             }
         }
-        if has_local_conflicts {
-            for ov in local_overrides {
+        if input.has_local_conflicts {
+            for ov in input.local_overrides {
                 let display = make_display_path(&ov.repo_dir, &home);
                 println!("  sshCommand in {} will be disabled", display);
             }
@@ -276,11 +285,11 @@ fn print_dry_run(
     let config_path = config::default_config_path();
     let config_display = make_display_path(&config_path, &home);
 
-    if suggestions.is_empty() {
+    if input.suggestions.is_empty() {
         println!("\nNo rules auto-detected.");
     } else {
-        println!("\nAuto-detected rules ({}):", suggestions.len());
-        for s in suggestions {
+        println!("\nAuto-detected rules ({}):", input.suggestions.len());
+        for s in input.suggestions {
             print!("  {} ", s.host);
             if let Some(pat) = &s.match_pattern {
                 print!("{} ", pat);
@@ -293,8 +302,10 @@ fn print_dry_run(
         }
     }
 
+    print_manual_rule_actions(input.manual_rules);
+
     if config_path.exists() {
-        let merged = merge_config(&config_path, suggestions);
+        let merged = merge_config(&config_path, input.suggestions);
         match merged {
             ConfigMergeResult::Unchanged(count) => {
                 println!("\nConfig: {} ({} rules, up to date)", config_display, count);
@@ -324,8 +335,8 @@ fn print_dry_run(
         println!("\nConfig: {} (will be created)", config_display);
     }
 
-    if !scanned_dirs.is_empty() {
-        println!("\nScope: repos under {}.", scanned_dirs.join(", "));
+    if !input.scanned_dirs.is_empty() {
+        println!("\nScope: repos under {}.", input.scanned_dirs.join(", "));
     }
 
     println!("\nRun `pickey init` to apply.");
@@ -912,89 +923,104 @@ fn git_config_get(key: &str, extra_args: &[&str]) -> Option<String> {
 }
 
 fn parse_include_ifs() -> Vec<IncludeIfRule> {
-    // Get all config entries to find includeIf patterns
     let output = Command::new("git")
-        .args(["config", "--global", "--list", "--show-origin"])
+        .args([
+            "config",
+            "--global",
+            "--get-regexp",
+            r"^includeif\..*\.path$",
+        ])
         .output();
 
-    let _output = match output {
+    let output = match output {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
         _ => return Vec::new(),
     };
 
-    // Also get the raw global gitconfig to find includeIf directives
     let home = dirs::home_dir().unwrap_or_default();
-    let global_config_path = home.join(".gitconfig");
-    let global_contents = std::fs::read_to_string(&global_config_path).unwrap_or_default();
-
     let mut rules = Vec::new();
 
-    // Parse includeIf lines: [includeIf "gitdir:~/dev/vce/"]
-    for line in global_contents.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("[includeIf \"gitdir:") {
-            if let Some(pattern) = rest.strip_suffix("\"]") {
-                // Find the path= on the next non-empty, non-comment line
-                // Actually, let's use a simpler approach: find the matching path in the full config
-                let path_key = format!("includeif.gitdir:{}.path", pattern);
-                if let Some(config_path) = git_config_get(&path_key, &["--global"]) {
-                    let expanded_config = if let Some(tail) = config_path.strip_prefix("~/") {
-                        home.join(tail)
-                    } else {
-                        PathBuf::from(&config_path)
-                    };
+    for line in output.lines() {
+        let Some((key, config_path)) = parse_git_config_key_value(line) else {
+            continue;
+        };
+        let Some(pattern) = include_pattern_from_config_key(key) else {
+            continue;
+        };
 
-                    // Read that config file for sshCommand, email, name
-                    let (ssh_command, email, name) = read_include_config(&expanded_config);
+        let expanded_config = if let Some(tail) = config_path.strip_prefix("~/") {
+            home.join(tail)
+        } else {
+            PathBuf::from(config_path)
+        };
 
-                    rules.push(IncludeIfRule {
-                        pattern: pattern.to_string(),
-                        config_path,
-                        ssh_command,
-                        email,
-                        name,
-                    });
-                }
-            }
-        }
+        let (ssh_command, email, name) = read_include_config(&expanded_config);
+
+        rules.push(IncludeIfRule {
+            pattern,
+            config_path: config_path.to_string(),
+            ssh_command,
+            email,
+            name,
+        });
     }
 
     rules
 }
 
-fn read_include_config(path: &Path) -> (Option<String>, Option<String>, Option<String>) {
-    let contents = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return (None, None, None),
-    };
-
-    let mut ssh_command = None;
-    let mut email = None;
-    let mut name = None;
-
-    for line in contents.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("sshCommand") {
-            let rest = rest.trim().strip_prefix('=').unwrap_or(rest).trim();
-            if !rest.is_empty() {
-                ssh_command = Some(rest.trim_matches('"').to_string());
-            }
-        }
-        if let Some(rest) = trimmed.strip_prefix("email") {
-            let rest = rest.trim().strip_prefix('=').unwrap_or(rest).trim();
-            if !rest.is_empty() {
-                email = Some(rest.trim_matches('"').to_string());
-            }
-        }
-        if let Some(rest) = trimmed.strip_prefix("name") {
-            let rest = rest.trim().strip_prefix('=').unwrap_or(rest).trim();
-            if !rest.is_empty() {
-                name = Some(rest.trim_matches('"').to_string());
-            }
-        }
+fn parse_git_config_key_value(line: &str) -> Option<(&str, &str)> {
+    let split_at = line.find(char::is_whitespace)?;
+    let key = &line[..split_at];
+    let value = line[split_at..].trim_start();
+    if key.is_empty() || value.is_empty() {
+        None
+    } else {
+        Some((key, value))
     }
+}
 
-    (ssh_command, email, name)
+fn include_pattern_from_config_key(key: &str) -> Option<String> {
+    let lower = key.to_ascii_lowercase();
+    let rest = lower.strip_prefix("includeif.")?;
+    let condition_len = rest.strip_suffix(".path")?.len();
+    let condition = &key["includeif.".len().."includeif.".len() + condition_len];
+    let condition_lower = condition.to_ascii_lowercase();
+
+    if condition_lower.starts_with("gitdir/i:") {
+        Some(condition["gitdir/i:".len()..].to_string())
+    } else if condition_lower.starts_with("gitdir:") {
+        Some(condition["gitdir:".len()..].to_string())
+    } else {
+        None
+    }
+}
+
+fn read_include_config(path: &Path) -> (Option<String>, Option<String>, Option<String>) {
+    (
+        git_config_get_from_file(path, "core.sshCommand"),
+        git_config_get_from_file(path, "user.email"),
+        git_config_get_from_file(path, "user.name"),
+    )
+}
+
+fn git_config_get_from_file(path: &Path, key: &str) -> Option<String> {
+    let output = Command::new("git")
+        .arg("config")
+        .arg("--file")
+        .arg(path)
+        .arg(key)
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if value.is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    } else {
+        None
+    }
 }
 
 // --- Config suggestion ---
@@ -1008,12 +1034,26 @@ struct SuggestedRule {
     port: Option<u16>,
 }
 
+struct ManualRule {
+    pattern: String,
+    key_display: String,
+    email: Option<String>,
+    name: Option<String>,
+    port: Option<u16>,
+}
+
+struct SuggestionBuild {
+    rules: Vec<SuggestedRule>,
+    manual_rules: Vec<ManualRule>,
+}
+
 fn build_suggestions(
     git_info: &GitInfo,
     _keys: &[SshKey],
     local_overrides: &[LocalSshOverride],
-) -> Vec<SuggestedRule> {
-    let mut suggestions = Vec::new();
+) -> SuggestionBuild {
+    let mut suggestions: Vec<SuggestedRule> = Vec::new();
+    let mut manual_rules: Vec<ManualRule> = Vec::new();
 
     // Build suggestions from includeIf rules that have sshCommand
     for inc in &git_info.include_ifs {
@@ -1027,17 +1067,15 @@ fn build_suggestions(
                 let grouped = group_repos_by_host_and_org(&repos);
 
                 if grouped.is_empty() {
-                    // No repos found — create a generic suggestion with a comment
-                    suggestions.push(SuggestedRule {
-                        host: "# Could not detect host for pattern: ".to_string() + &inc.pattern,
-                        match_pattern: None,
+                    manual_rules.push(ManualRule {
+                        pattern: inc.pattern.clone(),
                         key_display: key,
                         email: inc.email.clone(),
                         name: inc.name.clone(),
                         port,
                     });
                 } else {
-                    for ((host, org), _) in &grouped {
+                    for (host, org) in grouped.keys() {
                         let match_pattern = if org.is_empty() {
                             None
                         } else {
@@ -1139,24 +1177,55 @@ fn build_suggestions(
         }
     }
 
-    suggestions
+    SuggestionBuild {
+        rules: suggestions,
+        manual_rules,
+    }
+}
+
+fn print_manual_rule_actions(manual_rules: &[ManualRule]) {
+    if manual_rules.is_empty() {
+        return;
+    }
+
+    println!("\nManual rule needed:");
+    for rule in manual_rules {
+        println!(
+            "  Could not infer host/path for includeIf pattern {}.",
+            rule.pattern
+        );
+        println!("  Key: {}", rule.key_display);
+        if let Some(port) = rule.port {
+            println!("  Port: {}", port);
+        }
+        if let Some(email) = &rule.email {
+            println!("  Email: {}", email);
+        }
+        if let Some(name) = &rule.name {
+            println!("  Name: {}", name);
+        }
+    }
 }
 
 /// Parse an sshCommand like "/usr/bin/ssh -o IdentitiesOnly=yes -i ~/.ssh/vce_github -p 222"
 /// to extract the key path and optional port.
 fn parse_ssh_command_for_key_and_port(cmd: &str) -> (Option<String>, Option<u16>) {
-    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let parts = tokenize_ssh_command(cmd);
     let mut key = None;
     let mut port = None;
 
     let mut i = 0;
     while i < parts.len() {
-        if parts[i] == "-i" {
-            if let Some(k) = parts.get(i + 1) {
-                key = Some(k.to_string());
-                i += 2;
-                continue;
-            }
+        if parts[i] == "-i" && i + 1 < parts.len() {
+            let (value, next_i) = collect_ssh_option_value(&parts, i + 1);
+            key = Some(value);
+            i = next_i;
+            continue;
+        }
+        if let Some(k) = parts[i].strip_prefix("-i").filter(|k| !k.is_empty()) {
+            key = Some(k.to_string());
+            i += 1;
+            continue;
         }
         if parts[i] == "-p" {
             if let Some(p) = parts.get(i + 1) {
@@ -1165,10 +1234,108 @@ fn parse_ssh_command_for_key_and_port(cmd: &str) -> (Option<String>, Option<u16>
                 continue;
             }
         }
+        if let Some(p) = parts[i].strip_prefix("-p").filter(|p| !p.is_empty()) {
+            port = p.parse().ok();
+            i += 1;
+            continue;
+        }
+        if parts[i] == "-o" {
+            if let Some(option) = parts.get(i + 1) {
+                parse_ssh_option(option, &mut key, &mut port);
+                i += 2;
+                continue;
+            }
+        }
+        if let Some(option) = parts[i].strip_prefix("-o").filter(|o| !o.is_empty()) {
+            parse_ssh_option(option, &mut key, &mut port);
+            i += 1;
+            continue;
+        }
         i += 1;
     }
 
     (key, port)
+}
+
+fn collect_ssh_option_value(parts: &[String], start: usize) -> (String, usize) {
+    let mut end = start + 1;
+    while end < parts.len() && !parts[end].starts_with('-') {
+        end += 1;
+    }
+    (parts[start..end].join(" "), end)
+}
+
+fn parse_ssh_option(option: &str, key: &mut Option<String>, port: &mut Option<u16>) {
+    if let Some(value) = option.strip_prefix("IdentityFile=") {
+        *key = Some(value.to_string());
+    }
+    if let Some(value) = option.strip_prefix("Port=") {
+        *port = value.parse().ok();
+    }
+}
+
+fn tokenize_ssh_command(input: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut in_word = false;
+    let mut escaped = false;
+
+    for c in input.chars() {
+        if escaped {
+            current.push(c);
+            in_word = true;
+            escaped = false;
+            continue;
+        }
+
+        match quote {
+            Some('\'') => {
+                if c == '\'' {
+                    quote = None;
+                } else {
+                    current.push(c);
+                }
+            }
+            Some('"') => {
+                if c == '"' {
+                    quote = None;
+                } else if c == '\\' {
+                    escaped = true;
+                } else {
+                    current.push(c);
+                }
+            }
+            Some(_) => unreachable!(),
+            None => {
+                if c.is_whitespace() {
+                    if in_word {
+                        words.push(std::mem::take(&mut current));
+                        in_word = false;
+                    }
+                } else if c == '\'' || c == '"' {
+                    quote = Some(c);
+                    in_word = true;
+                } else if c == '\\' {
+                    escaped = true;
+                } else {
+                    current.push(c);
+                    in_word = true;
+                }
+            }
+        }
+    }
+
+    if escaped {
+        current.push('\\');
+        in_word = true;
+    }
+
+    if in_word {
+        words.push(current);
+    }
+
+    words
 }
 
 /// Find git repos under a gitdir pattern like "~/dev/vce/**"
@@ -1266,6 +1433,105 @@ fn extract_org(host: &str, path: &str) -> String {
 
     // GitHub/GitLab/Gitea: Org/Repo → Org
     parts.first().unwrap_or(&"").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn parse_include_key_extracts_gitdir_pattern() {
+        assert_eq!(
+            include_pattern_from_config_key("includeif.gitdir:~/work/**.path").as_deref(),
+            Some("~/work/**")
+        );
+        assert_eq!(
+            include_pattern_from_config_key("includeif.gitdir/i:/Users/me/Work/.path").as_deref(),
+            Some("/Users/me/Work/")
+        );
+        assert!(include_pattern_from_config_key("includeif.onbranch:main.path").is_none());
+    }
+
+    #[test]
+    fn parse_git_config_output_preserves_values_with_spaces() {
+        let (key, value) =
+            parse_git_config_key_value("includeif.gitdir:~/work/**.path ~/Work Configs/git")
+                .unwrap();
+        assert_eq!(key, "includeif.gitdir:~/work/**.path");
+        assert_eq!(value, "~/Work Configs/git");
+    }
+
+    #[test]
+    fn read_include_config_uses_git_config_parser() {
+        let tmp = TempDir::new().unwrap();
+        let config = tmp.path().join("included.gitconfig");
+        std::fs::write(
+            &config,
+            r#"
+[core]
+    sshCommand = ssh -i "/tmp/key with space" -p 2222
+[user]
+    email = work@example.com
+    name = "Work Name"
+"#,
+        )
+        .unwrap();
+
+        let (ssh_command, email, name) = read_include_config(&config);
+        assert_eq!(
+            ssh_command.as_deref(),
+            Some("ssh -i /tmp/key with space -p 2222")
+        );
+        assert_eq!(email.as_deref(), Some("work@example.com"));
+        assert_eq!(name.as_deref(), Some("Work Name"));
+    }
+
+    #[test]
+    fn parse_ssh_command_handles_quoted_paths_and_port_options() {
+        let (key, port) =
+            parse_ssh_command_for_key_and_port(r#"ssh -o Port=443 -i "/Users/me/Keys/work key""#);
+        assert_eq!(key.as_deref(), Some("/Users/me/Keys/work key"));
+        assert_eq!(port, Some(443));
+
+        let (key, port) =
+            parse_ssh_command_for_key_and_port(r#"ssh -i /Users/me/Keys/work key -p 2222"#);
+        assert_eq!(key.as_deref(), Some("/Users/me/Keys/work key"));
+        assert_eq!(port, Some(2222));
+
+        let (key, port) = parse_ssh_command_for_key_and_port(
+            r#"ssh -oIdentityFile="/Users/me/Keys/another key" -p2222"#,
+        );
+        assert_eq!(key.as_deref(), Some("/Users/me/Keys/another key"));
+        assert_eq!(port, Some(2222));
+    }
+
+    #[test]
+    fn unresolved_include_becomes_manual_action_not_rule() {
+        let tmp = TempDir::new().unwrap();
+        let pattern = format!("{}/missing/**", tmp.path().display());
+        let git_info = GitInfo {
+            global_ssh_command: None,
+            include_ifs: vec![IncludeIfRule {
+                pattern: pattern.clone(),
+                config_path: "~/.gitconfig-work".to_string(),
+                ssh_command: Some(r#"ssh -i "/tmp/key with space""#.to_string()),
+                email: Some("work@example.com".to_string()),
+                name: Some("Work Name".to_string()),
+            }],
+            global_email: None,
+            global_name: None,
+        };
+
+        let build = build_suggestions(&git_info, &[], &[]);
+        assert!(build.rules.is_empty());
+        assert_eq!(build.manual_rules.len(), 1);
+        assert_eq!(build.manual_rules[0].pattern, pattern);
+        assert_eq!(
+            build.manual_rules[0].key_display,
+            "/tmp/key with space".to_string()
+        );
+    }
 }
 
 // (end of file)
