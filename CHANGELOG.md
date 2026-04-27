@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/simeoncode/pickey/compare/v0.3.0...v0.3.1) (2026-04-27)
+
+
+### Bug Fixes
+
+* harden init config parsing ([#5](https://github.com/simeoncode/pickey/issues/5)) ([bf19b56](https://github.com/simeoncode/pickey/commit/bf19b562364536b9969f4570312efa57a4937f8a))
+
 ## [0.3.0](https://github.com/simeoncode/pickey/compare/v0.2.0...v0.3.0) (2026-04-17)
 
 
