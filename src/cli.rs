@@ -17,7 +17,7 @@ pub fn status(config: &Config) {
         println!("pickey: active ({} rules)", config.rules.len());
     } else {
         println!("pickey: not active");
-        println!("  Run `pickey init --apply` to set up");
+        println!("  Run `pickey init` to set up");
         return;
     }
 
@@ -44,9 +44,9 @@ pub fn status(config: &Config) {
                     println!();
                     if let Some(email) = &m.rule.email {
                         println!(
-                            "Commits: {} {}",
+                            "Commits: {} <{}>",
                             m.rule.name.as_deref().unwrap_or(""),
-                            format!("<{}>", email)
+                            email
                         );
                     }
                 }
