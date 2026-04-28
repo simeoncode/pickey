@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/simeoncode/pickey/compare/v0.3.2...v0.3.3) (2026-04-28)
+
+
+### Bug Fixes
+
+* correct release publishing checks ([cda39f3](https://github.com/simeoncode/pickey/commit/cda39f34d6f33fd7485c567a39e975a6f8c34194))
+
 ## [0.3.2](https://github.com/simeoncode/pickey/compare/v0.3.1...v0.3.2) (2026-04-28)
 
 
