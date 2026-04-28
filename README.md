@@ -28,6 +28,22 @@ Pushing…
 
 ## Install
 
+### Homebrew
+
+```bash
+brew install simeoncode/tap/pickey
+pickey init # --dry-run (to only preview changes)
+```
+
+### Cargo
+
+```bash
+cargo install pickey --locked
+pickey init # --dry-run (to only preview changes)
+```
+
+### Prebuilt Binary
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/simeoncode/pickey/main/install.sh | sh
 …
@@ -83,4 +99,3 @@ Rules are evaluated top-to-bottom, first match wins. `match` is a glob pattern a
 ## How it works
 
 pickey sits as git's `sshCommand`. When git calls SSH, pickey matches the remote against your rules and injects `-i <key>` with `-o IdentityAgent=none` — so the right key is used and the ssh-agent can't override it. That's the whole trick.
-

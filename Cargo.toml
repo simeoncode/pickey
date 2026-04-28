@@ -4,6 +4,21 @@ version = "0.3.1"
 edition = "2021"
 description = "Automatic SSH key selection for git"
 license = "MIT"
+repository = "https://github.com/simeoncode/pickey"
+homepage = "https://github.com/simeoncode/pickey"
+documentation = "https://docs.rs/pickey"
+readme = "README.md"
+keywords = ["git", "ssh", "github", "identity", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+include = [
+    "/src/**",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/DESIGN.md",
+    "/CHANGELOG.md",
+    "/logo.svg",
+]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

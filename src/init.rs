@@ -1004,7 +1004,11 @@ fn read_include_config(path: &Path) -> (Option<String>, Option<String>, Option<S
 }
 
 fn git_config_get_from_file(path: &Path, key: &str) -> Option<String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    if path.is_absolute() {
+        command.current_dir("/");
+    }
+    let output = command
         .arg("config")
         .arg("--file")
         .arg(path)
