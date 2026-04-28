@@ -42,7 +42,7 @@ chmod +x "${TMPDIR}/pickey"
 # Install
 if [ -w "$INSTALL_DIR" ]; then
   mv "${TMPDIR}/pickey" "${INSTALL_DIR}/pickey"
-elif [ -w "$(dirname "$INSTALL_DIR")" ] || [ -d "$INSTALL_DIR" ]; then
+elif [ ! -e "$INSTALL_DIR" ] && [ -w "$(dirname "$INSTALL_DIR")" ]; then
   mkdir -p "$INSTALL_DIR"
   mv "${TMPDIR}/pickey" "${INSTALL_DIR}/pickey"
 else
