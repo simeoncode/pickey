@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/simeoncode/pickey/compare/v0.3.1...v0.3.2) (2026-04-28)
+
+
+### Bug Fixes
+
+* use sudo for unwritable install dirs ([2b2b5fa](https://github.com/simeoncode/pickey/commit/2b2b5faa624f012c93867d2a7c02d6a0e3803456))
+
 ## [0.3.1](https://github.com/simeoncode/pickey/compare/v0.3.0...v0.3.1) (2026-04-27)
 
 
