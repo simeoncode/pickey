@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/simeoncode/pickey/compare/v0.3.3...v0.3.4) (2026-04-29)
+
+
+### Bug Fixes
+
+* handle version flags as cli options ([86f6e59](https://github.com/simeoncode/pickey/commit/86f6e59558de6142efa57c429487d0254e30d1f7))
+
 ## [0.3.3](https://github.com/simeoncode/pickey/compare/v0.3.2...v0.3.3) (2026-04-28)
 
 
