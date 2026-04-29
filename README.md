@@ -67,6 +67,9 @@ pickey test               # Test SSH connection
 `~/.config/pickey/config.toml`:
 
 ```toml
+[macos]
+use_keychain = true
+
 [[rule]]
 host = "github.com"
 match = "WORK-Internal/*"
@@ -83,6 +86,8 @@ key = "~/.ssh/id_personal"
 Rules auto-detected by `pickey init` include `auto = true` — these are safely replaced when you re-run init. Manually added rules (without `auto = true`) are always preserved.
 
 Rules are evaluated top-to-bottom, first match wins. `match` is a glob pattern against the full path after the host. If no rule matches, pickey falls through to plain `ssh` (with a warning).
+
+On macOS, `[macos] use_keychain = true` runs Apple OpenSSH (`/usr/bin/ssh`) and injects `UseKeychain=yes` for matched rules so it can read private-key passphrases from Keychain. pickey does not run `ssh-add` or store secrets itself.
 
 ### Fields
 
