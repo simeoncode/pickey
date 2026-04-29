@@ -12,7 +12,11 @@ use clap::{Parser, Subcommand};
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "pickey", about = "Automatic SSH key selection for git")]
+#[command(
+    name = "pickey",
+    about = "Automatic SSH key selection for git",
+    version
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
