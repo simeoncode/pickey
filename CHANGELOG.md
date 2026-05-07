@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/simeoncode/pickey/compare/v0.3.4...v0.4.0) (2026-05-07)
+
+
+### Features
+
+* support macOS Keychain passphrases ([#11](https://github.com/simeoncode/pickey/issues/11)) ([6335f47](https://github.com/simeoncode/pickey/commit/6335f47a035d445cc8869cb8024c4be6412a1b0c))
+
 ## [0.3.4](https://github.com/simeoncode/pickey/compare/v0.3.3...v0.3.4) (2026-04-29)
 
 
