@@ -43,13 +43,23 @@ fn build_ssh_args(
 ) -> Vec<String> {
     let mut ssh_args: Vec<String> = Vec::new();
 
-    // Inject -i <key> and force agent-off so only the selected key is offered.
+    // Inject -i <key> so the selected key is always offered.
     ssh_args.push("-i".to_string());
     ssh_args.push(key_path.to_string());
 
     if !has_identity_agent_flag(original_args) {
         ssh_args.push("-o".to_string());
-        ssh_args.push("IdentityAgent=none".to_string());
+        if should_use_keychain(use_macos_keychain) {
+            // Keep agent connected so Keychain can supply passphrases.
+            let agent_sock = std::env::var("SSH_AUTH_SOCK").unwrap_or_default();
+            if agent_sock.is_empty() {
+                ssh_args.push("IdentityAgent=none".to_string());
+            } else {
+                ssh_args.push(format!("IdentityAgent={}", agent_sock));
+            }
+        } else {
+            ssh_args.push("IdentityAgent=none".to_string());
+        }
     }
 
     if !has_identities_only {
@@ -57,9 +67,15 @@ fn build_ssh_args(
         ssh_args.push("IdentitiesOnly=yes".to_string());
     }
 
-    if should_use_keychain(use_macos_keychain) && !has_use_keychain_flag(original_args) {
-        ssh_args.push("-o".to_string());
-        ssh_args.push("UseKeychain=yes".to_string());
+    if should_use_keychain(use_macos_keychain) {
+        if !has_use_keychain_flag(original_args) {
+            ssh_args.push("-o".to_string());
+            ssh_args.push("UseKeychain=yes".to_string());
+        }
+        if !has_add_keys_to_agent_flag(original_args) {
+            ssh_args.push("-o".to_string());
+            ssh_args.push("AddKeysToAgent=yes".to_string());
+        }
     }
 
     // Inject port if configured and not already in args
@@ -123,15 +139,26 @@ fn has_identity_agent_flag(args: &[String]) -> bool {
 
 /// Check if the original args already contain a UseKeychain option.
 fn has_use_keychain_flag(args: &[String]) -> bool {
+    has_ssh_option(args, "UseKeychain=")
+}
+
+/// Check if the original args already contain an AddKeysToAgent option.
+fn has_add_keys_to_agent_flag(args: &[String]) -> bool {
+    has_ssh_option(args, "AddKeysToAgent=")
+}
+
+/// Check if the original args already contain a given -o option prefix.
+fn has_ssh_option(args: &[String], prefix: &str) -> bool {
+    let compact = format!("-o{}", prefix);
     for (i, arg) in args.iter().enumerate() {
         if arg == "-o" {
             if let Some(next) = args.get(i + 1) {
-                if next.starts_with("UseKeychain=") {
+                if next.starts_with(prefix) {
                     return true;
                 }
             }
         }
-        if arg.starts_with("-oUseKeychain=") {
+        if arg.starts_with(&compact) {
             return true;
         }
     }
@@ -162,18 +189,36 @@ pub fn passthrough_ssh(original_args: &[String]) -> Result<i32, String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn injects_identity_agent_none_by_default() {
-        let original_args = vec![
+    fn sample_args() -> Vec<String> {
+        vec![
             "git@github.com".to_string(),
             "git-upload-pack".to_string(),
             "Org/repo.git".to_string(),
-        ];
+        ]
+    }
 
-        let final_args = build_ssh_args(&original_args, "~/.ssh/id_work", false, None, false);
+    #[test]
+    fn injects_identity_agent_none_when_keychain_disabled() {
+        let args = sample_args();
+        let final_args = build_ssh_args(&args, "~/.ssh/id_work", false, None, false);
         assert!(final_args
             .windows(2)
             .any(|w| w[0] == "-o" && w[1] == "IdentityAgent=none"));
+    }
+
+    #[test]
+    fn always_injects_identities_only() {
+        let args = sample_args();
+        // With keychain
+        let final_args = build_ssh_args(&args, "~/.ssh/id_work", false, None, true);
+        assert!(final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1] == "IdentitiesOnly=yes"));
+        // Without keychain
+        let final_args = build_ssh_args(&args, "~/.ssh/id_work", false, None, false);
+        assert!(final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1] == "IdentitiesOnly=yes"));
     }
 
     #[test]
@@ -187,7 +232,6 @@ mod tests {
         ];
 
         let final_args = build_ssh_args(&original_args, "~/.ssh/id_work", false, None, false);
-
         let none_count = final_args
             .windows(2)
             .filter(|w| w[0] == "-o" && w[1] == "IdentityAgent=none")
@@ -215,22 +259,6 @@ mod tests {
         assert!(final_args.iter().any(|a| a == "git@ssh.github.com"));
     }
 
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn injects_use_keychain_on_macos_when_enabled() {
-        let original_args = vec![
-            "git@github.com".to_string(),
-            "git-upload-pack".to_string(),
-            "Org/repo.git".to_string(),
-        ];
-
-        let final_args = build_ssh_args(&original_args, "~/.ssh/id_work", false, None, true);
-        assert!(final_args
-            .windows(2)
-            .any(|w| w[0] == "-o" && w[1] == "UseKeychain=yes"));
-        assert_eq!(ssh_program(true), "/usr/bin/ssh");
-    }
-
     #[test]
     fn does_not_duplicate_use_keychain_flag() {
         let original_args = vec![
@@ -247,5 +275,114 @@ mod tests {
             .filter(|w| w[0] == "-o" && w[1].starts_with("UseKeychain="))
             .count();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn does_not_duplicate_add_keys_to_agent_flag() {
+        let original_args = vec![
+            "-o".to_string(),
+            "AddKeysToAgent=no".to_string(),
+            "git@github.com".to_string(),
+            "git-upload-pack".to_string(),
+            "Org/repo.git".to_string(),
+        ];
+
+        let final_args = build_ssh_args(&original_args, "~/.ssh/id_work", false, None, true);
+        let count = final_args
+            .windows(2)
+            .filter(|w| w[0] == "-o" && w[1].starts_with("AddKeysToAgent="))
+            .count();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn keychain_disabled_no_use_keychain_or_add_keys() {
+        let args = sample_args();
+        let final_args = build_ssh_args(&args, "~/.ssh/id_work", false, None, false);
+        assert!(!final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1].starts_with("UseKeychain=")));
+        assert!(!final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1].starts_with("AddKeysToAgent=")));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_keychain_injects_all_flags() {
+        let args = sample_args();
+        let final_args = build_ssh_args(&args, "~/.ssh/id_work", false, None, true);
+
+        assert!(final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1] == "UseKeychain=yes"));
+        assert!(final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1] == "AddKeysToAgent=yes"));
+        assert!(final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1] == "IdentitiesOnly=yes"));
+        // Should NOT have IdentityAgent=none
+        assert!(!final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1] == "IdentityAgent=none"));
+        assert_eq!(ssh_program(true), "/usr/bin/ssh");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_keychain_uses_ssh_auth_sock() {
+        let args = sample_args();
+        // Set a known value for the test
+        std::env::set_var("SSH_AUTH_SOCK", "/tmp/test-agent.sock");
+        let final_args = build_ssh_args(&args, "~/.ssh/id_work", false, None, true);
+        assert!(final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1] == "IdentityAgent=/tmp/test-agent.sock"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_keychain_falls_back_when_no_auth_sock() {
+        let args = sample_args();
+        std::env::remove_var("SSH_AUTH_SOCK");
+        let final_args = build_ssh_args(&args, "~/.ssh/id_work", false, None, true);
+        assert!(final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1] == "IdentityAgent=none"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_opt_out_falls_back_to_agent_off() {
+        let args = sample_args();
+        let final_args = build_ssh_args(&args, "~/.ssh/id_work", false, None, false);
+        assert!(final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1] == "IdentityAgent=none"));
+        assert!(!final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1].starts_with("UseKeychain=")));
+        assert!(!final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1].starts_with("AddKeysToAgent=")));
+        assert_eq!(ssh_program(false), "ssh");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn non_macos_ignores_keychain_setting() {
+        let args = sample_args();
+        let final_args = build_ssh_args(&args, "~/.ssh/id_work", false, None, true);
+        assert!(final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1] == "IdentityAgent=none"));
+        assert!(!final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1].starts_with("UseKeychain=")));
+        assert!(!final_args
+            .windows(2)
+            .any(|w| w[0] == "-o" && w[1].starts_with("AddKeysToAgent=")));
+        assert_eq!(ssh_program(true), "ssh");
     }
 }

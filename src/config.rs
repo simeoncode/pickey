@@ -9,11 +9,23 @@ pub struct Config {
     pub rules: Vec<Rule>,
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct MacosConfig {
-    /// If true on macOS, ask Apple OpenSSH to read key passphrases from Keychain.
-    #[serde(default)]
+    /// If false on macOS, disable Keychain integration. Enabled by default.
+    #[serde(default = "default_use_keychain")]
     pub use_keychain: bool,
+}
+
+fn default_use_keychain() -> bool {
+    true
+}
+
+impl Default for MacosConfig {
+    fn default() -> Self {
+        Self {
+            use_keychain: default_use_keychain(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -130,8 +142,22 @@ key = "~/.ssh/id_client_gitlab"
     }
 
     #[test]
-    fn macos_config_defaults_to_no_keychain() {
+    fn macos_config_defaults_to_keychain_enabled() {
         let toml = r#"
+[[rule]]
+host = "github.com"
+key = "~/.ssh/id_personal"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.macos.use_keychain);
+    }
+
+    #[test]
+    fn macos_config_explicit_disable() {
+        let toml = r#"
+[macos]
+use_keychain = false
+
 [[rule]]
 host = "github.com"
 key = "~/.ssh/id_personal"

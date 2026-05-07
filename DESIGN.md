@@ -19,7 +19,7 @@ pickey is a transparent SSH proxy for git. It does one thing: pick the right key
 
 **Does:**
 - Select SSH key based on remote URL pattern
-- Inject `-o IdentityAgent=none` so only the selected key is offered
+- Inject `-o IdentityAgent=none` (or the system agent on macOS) so only the selected key is offered
 - Set repo-local `user.email`/`user.name` after SSH operations
 - Block pushes when tracked unpushed commits have wrong author email
 - Onboard from existing git config (`pickey init`)
@@ -27,7 +27,7 @@ pickey is a transparent SSH proxy for git. It does one thing: pick the right key
 **Does not:**
 - Manage key lifecycle (create, rotate, delete) — use `ssh-keygen`
 - Parse or modify `~/.ssh/config` — pickey's command-line flags (`-i`, `-o IdentitiesOnly=yes`) take precedence at runtime without touching SSH config
-- Interact with ssh-agent — keys are read directly from disk via `-i`, agent is disabled per-invocation
+- Interact with ssh-agent — keys are read directly from disk via `-i`, agent is disabled per-invocation (except on macOS with Keychain enabled)
 - Handle HTTPS auth — SSH only
 
 ## FAQ / Decisions
@@ -61,3 +61,26 @@ These fields are optional. If you only need SSH key routing, leave them out.
 ### Does pickey work with SSH over HTTPS (port 443)?
 
 Yes. Because pickey sits on top of your system's SSH binary, any Hostname or Port overrides in your ~/.ssh/config are automatically respected. If you use explicit ssh://git@ssh.github.com:443 remotes, just use host = "ssh.github.com" in your pickey rules.
+
+### Why macOS Keychain is enabled by default
+
+On macOS, passphrase-protected SSH keys are common. Without Keychain integration, every `git push` or `git pull` would prompt for the passphrase — a dealbreaker for automated workflows and AI agent terminals.
+
+pickey enables Keychain integration by default on macOS by:
+
+1. Using Apple's OpenSSH (`/usr/bin/ssh`) instead of whatever `ssh` is on `$PATH` — only Apple's fork understands the `UseKeychain` option.
+2. Injecting `-o UseKeychain=yes` so SSH reads saved passphrases from Keychain.
+3. Injecting `-o AddKeysToAgent=yes` so the first successful passphrase entry is saved to Keychain automatically.
+4. Injecting `-o IdentityAgent=<$SSH_AUTH_SOCK>` instead of `IdentityAgent=none` — the agent must stay connected for Keychain to supply passphrases. `IdentitiesOnly=yes` still prevents the agent from offering wrong keys.
+
+The user experience: first `git push` with a passphrase key prompts once in the terminal, macOS saves the passphrase to Keychain, every subsequent operation is silent. No manual `ssh-add` needed.
+
+Users who don't want this can set `[macos] use_keychain = false` in their config — pickey then falls back to `IdentityAgent=none` like on Linux.
+
+On non-macOS platforms, the setting is ignored and `IdentityAgent=none` is always used.
+
+#### A note on biometric prompts
+
+Prior to macOS Sierra (10.12), SSH on macOS showed a GUI dialog offering to save the passphrase to Keychain. That dialog has been removed. There is no longer a biometric or GUI passphrase prompt for SSH on macOS — the passphrase is always entered in the terminal on first use, then stored and retrieved silently by Keychain on subsequent uses. See [Apple TN2449](https://developer.apple.com/library/archive/technotes/tn2449/_index.html).
+
+If biometric authentication at the SSH protocol level is required (e.g. Touch ID per-connection), that requires a FIDO2 hardware-backed key (`ed25519-sk`). Such keys work with pickey without any special configuration — pickey injects `-i <key>` as usual and SSH handles the biometric challenge.
