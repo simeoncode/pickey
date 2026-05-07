@@ -78,11 +78,18 @@ name = "My Name"
 host = "github.com"
 match = "MyPersonalOrg/*"
 key = "~/.ssh/id_personal"
+
+# macOS Keychain integration is enabled by default.
+# Uncomment to disable:
+# [macos]
+# use_keychain = false
 ```
 
 Rules auto-detected by `pickey init` include `auto = true` — these are safely replaced when you re-run init. Manually added rules (without `auto = true`) are always preserved.
 
 Rules are evaluated top-to-bottom, first match wins. `match` is a glob pattern against the full path after the host. If no rule matches, pickey falls through to plain `ssh` (with a warning).
+
+On macOS, pickey automatically integrates with Keychain for passphrase-protected keys. When a rule matches, pickey uses Apple's OpenSSH (`/usr/bin/ssh`) and injects `-o UseKeychain=yes` and `-o AddKeysToAgent=yes` so passphrases are read from Keychain — and saved there on first use. The first `git push` with a new passphrase key prompts once; every subsequent operation is silent. To opt out, set `[macos] use_keychain = false`.
 
 ### Fields
 
@@ -98,4 +105,4 @@ Rules are evaluated top-to-bottom, first match wins. `match` is a glob pattern a
 
 ## How it works
 
-pickey sits as git's `sshCommand`. When git calls SSH, pickey matches the remote against your rules and injects `-i <key>` with `-o IdentityAgent=none` — so the right key is used and the ssh-agent can't override it. That's the whole trick.
+pickey sits as git's `sshCommand`. When git calls SSH, pickey matches the remote against your rules and injects `-i <key>` with `-o IdentitiesOnly=yes` — so the right key is used and no others are offered. On Linux, `IdentityAgent=none` disables the agent entirely. On macOS, the agent stays connected (pointing to `$SSH_AUTH_SOCK`) so Keychain can supply passphrases transparently.

@@ -3,8 +3,29 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
+    #[serde(default)]
+    pub macos: MacosConfig,
     #[serde(rename = "rule", default)]
     pub rules: Vec<Rule>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct MacosConfig {
+    /// If false on macOS, disable Keychain integration. Enabled by default.
+    #[serde(default = "default_use_keychain")]
+    pub use_keychain: bool,
+}
+
+fn default_use_keychain() -> bool {
+    true
+}
+
+impl Default for MacosConfig {
+    fn default() -> Self {
+        Self {
+            use_keychain: default_use_keychain(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -82,6 +103,9 @@ mod tests {
     #[test]
     fn parse_full_config() {
         let toml = r#"
+[macos]
+use_keychain = true
+
 [[rule]]
 host = "github.com"
 match = "VolvoGroup-Internal/*"
@@ -105,6 +129,7 @@ host = "gitlab.selfhosted.client.com"
 key = "~/.ssh/id_client_gitlab"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.macos.use_keychain);
         assert_eq!(config.rules.len(), 4);
         assert_eq!(config.rules[0].host, "github.com");
         assert_eq!(
@@ -114,6 +139,31 @@ key = "~/.ssh/id_client_gitlab"
         assert_eq!(config.rules[0].email.as_deref(), Some("simeon@volvo.com"));
         assert!(config.rules[1].email.is_none());
         assert!(config.rules[3].match_pattern.is_none());
+    }
+
+    #[test]
+    fn macos_config_defaults_to_keychain_enabled() {
+        let toml = r#"
+[[rule]]
+host = "github.com"
+key = "~/.ssh/id_personal"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.macos.use_keychain);
+    }
+
+    #[test]
+    fn macos_config_explicit_disable() {
+        let toml = r#"
+[macos]
+use_keychain = false
+
+[[rule]]
+host = "github.com"
+key = "~/.ssh/id_personal"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(!config.macos.use_keychain);
     }
 
     #[test]
