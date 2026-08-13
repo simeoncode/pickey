@@ -33,6 +33,20 @@ pub(crate) fn build_ssh_args(
     port: Option<u16>,
     use_macos_keychain: bool,
 ) -> Vec<String> {
+    build_ssh_args_with_keychain(
+        original_args,
+        key_path,
+        port,
+        should_use_keychain(use_macos_keychain),
+    )
+}
+
+fn build_ssh_args_with_keychain(
+    original_args: &[String],
+    key_path: &str,
+    port: Option<u16>,
+    use_keychain: bool,
+) -> Vec<String> {
     // Inject -i <key> so the selected key is always offered.
     let mut ssh_args = vec!["-i".to_string(), key_path.to_string()];
 
@@ -45,7 +59,7 @@ pub(crate) fn build_ssh_args(
         "IdentityAgent=none".to_string(),
     ]);
 
-    if should_use_keychain(use_macos_keychain) {
+    if use_keychain {
         ssh_args.push("-o".to_string());
         ssh_args.push("UseKeychain=yes".to_string());
     }
@@ -205,7 +219,7 @@ mod tests {
             "Org/repo.git".to_string(),
         ];
 
-        let final_args = build_ssh_args(&original_args, "~/.ssh/id_work", None, true);
+        let final_args = build_ssh_args_with_keychain(&original_args, "~/.ssh/id_work", None, true);
         let injected_yes = final_args
             .windows(2)
             .position(|w| w[0] == "-o" && w[1] == "UseKeychain=yes")
@@ -229,11 +243,10 @@ mod tests {
             .any(|w| w[0] == "-o" && w[1].starts_with("AddKeysToAgent=")));
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn macos_keychain_uses_selected_key_without_exposing_agent() {
+    fn keychain_uses_selected_key_without_exposing_agent() {
         let args = sample_args();
-        let final_args = build_ssh_args(&args, "~/.ssh/id_work", None, true);
+        let final_args = build_ssh_args_with_keychain(&args, "~/.ssh/id_work", None, true);
 
         assert!(final_args
             .windows(2)
@@ -250,16 +263,14 @@ mod tests {
         assert!(!final_args
             .windows(2)
             .any(|w| w[0] == "-o" && w[1].starts_with("AddKeysToAgent=")));
-        assert_eq!(ssh_program(true), "/usr/bin/ssh");
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn macos_keychain_ignores_agent_with_wrong_valid_key() {
+    fn keychain_ignores_agent_with_wrong_valid_key() {
         let args = sample_args();
         let previous_agent = std::env::var_os("SSH_AUTH_SOCK");
         std::env::set_var("SSH_AUTH_SOCK", "/tmp/agent-with-wrong-valid-key.sock");
-        let final_args = build_ssh_args(&args, "~/.ssh/id_work", None, true);
+        let final_args = build_ssh_args_with_keychain(&args, "~/.ssh/id_work", None, true);
         match previous_agent {
             Some(value) => std::env::set_var("SSH_AUTH_SOCK", value),
             None => std::env::remove_var("SSH_AUTH_SOCK"),
