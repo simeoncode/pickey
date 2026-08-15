@@ -2,6 +2,7 @@ use std::process::Command;
 
 use crate::config::{self, Config};
 use crate::matcher;
+use crate::ssh;
 
 /// `pickey` (no args) or `pickey status` — health check dashboard.
 pub fn status(config: &Config) {
@@ -224,15 +225,15 @@ pub fn test(config: &Config) {
     let key_path = m.rule.expanded_key();
     println!("Testing SSH to {} with key {}", host, m.rule.key);
 
-    let result = Command::new("ssh")
-        .args([
-            "-T",
-            "-i",
-            &key_path.to_string_lossy(),
-            "-o",
-            "IdentitiesOnly=yes",
-            &format!("git@{}", host),
-        ])
+    let original_args = vec!["-T".to_string(), format!("git@{}", host)];
+    let ssh_args = ssh::build_ssh_args(
+        &original_args,
+        &key_path.to_string_lossy(),
+        m.rule.port,
+        config.macos.use_keychain,
+    );
+    let result = Command::new(ssh::ssh_program(config.macos.use_keychain))
+        .args(&ssh_args)
         .output();
 
     match result {

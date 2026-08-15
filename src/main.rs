@@ -193,11 +193,9 @@ fn run_ssh_command(args: &[String]) {
             }
 
             // Invoke ssh with the matched key
-            let id_only = ssh::has_identities_only(args);
             let code = ssh::invoke_ssh(
                 args,
                 &key_path.to_string_lossy(),
-                id_only,
                 m.rule.port,
                 config.macos.use_keychain,
             )
