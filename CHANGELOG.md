@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/simeoncode/pickey/compare/v0.4.0...v0.4.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* isolate macOS Keychain authentication from SSH agent ([#13](https://github.com/simeoncode/pickey/issues/13)) ([3d65d2b](https://github.com/simeoncode/pickey/commit/3d65d2ba7c62df4bc5111eaa11374a91960efca6))
+
 ## [0.4.0](https://github.com/simeoncode/pickey/compare/v0.3.4...v0.4.0) (2026-05-07)
 
 
